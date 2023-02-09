@@ -561,7 +561,7 @@ def train_survival(
         dataset,
         batch_size=batch_size,
         sampler=sampler,
-        collate_fn=collate_fn,
+        # collate_fn=collate_fn,
     )
 
     results = {}
@@ -642,7 +642,7 @@ def tune_survival(
         dataset,
         batch_size=batch_size,
         sampler=sampler,
-        collate_fn=collate_fn,
+        # collate_fn=collate_fn,
     )
 
     results = {}
@@ -717,7 +717,7 @@ def test_survival(
         dataset,
         batch_size=batch_size,
         sampler=sampler,
-        collate_fn=collate_fn,
+        # collate_fn=collate_fn,
     )
 
     results = {}

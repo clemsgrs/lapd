@@ -53,7 +53,7 @@ def main(cfg: DictConfig):
     num_classes = cfg.nbins
     criterion = LossFactory(cfg.task, cfg.loss).get_loss()
 
-    model = timm.create_model(cfg.model.arch, pretrained=True, num_classes=num_classes, in_chans=cfg.tile_emb_size)
+    model = timm.create_model(cfg.model.arch, pretrained=False, num_classes=num_classes, in_chans=cfg.tile_emb_size)
     # print(model)
 
     print("Loading data")
@@ -78,9 +78,6 @@ def main(cfg: DictConfig):
         patient_dfs[p] = patient_df[patient_df.partition == p].reset_index(drop=True)
         slide_dfs[p] = slide_df[slide_df.partition == p]
 
-    print(patient_dfs["train"].head())
-    print(patient_dfs["tune"].head())
-    print(patient_dfs["test"].head())
     print(f"Initializing training dataset")
     train_dataset = MaxContourTensorSurvivalDataset(
         patient_dfs["train"],

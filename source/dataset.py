@@ -61,13 +61,11 @@ class MaxContourTensorDataset(torch.utils.data.Dataset):
             df (pd.DataFrame): dataframe containing following columns 'slide_id', 'x', 'y'
             features_dir (Path): _description_
             tile_size (int): _description_
-            fmt (str, optional): _description_. Defaults to 'jpg'.
             emb_size (int, optional): _description_. Defaults to 192.
             transform (Callable, optional): _description_. Defaults to None.
         """
         self.features_dir = features_dir
         self.tile_size = tile_size
-        self.fmt = fmt
         self.emb_size = emb_size
         self.label_name = label_name
         self.label_mapping = label_mapping
@@ -155,7 +153,7 @@ class MaxContourTensorSurvivalDataset(torch.utils.data.Dataset):
             self.filtered_contours[slide_id][contour] = ntile
         return df
 
-    def get_tensor_shape(coords: np.ndarray, tile_size: int, min_size: int = 32):
+    def get_tensor_shape(self, coords: np.ndarray, tile_size: int, min_size: int = 224):
         max_x, max_y = coords[:,0].max(), coords[:,1].max()
         min_x, min_y = coords[:,0].min(), coords[:,1].min()
         delta_x = max_x - min_x
@@ -193,6 +191,9 @@ class MaxContourTensorSurvivalDataset(torch.utils.data.Dataset):
             emb = torch.load(emb_path)
             i, j = y // self.tile_size, x // self.tile_size
             t[i,j] = emb
+
+        # put channels first
+        t = t.permute(2, 0, 1)
 
         label = row.disc_label
         event_time = row[self.label_name]
