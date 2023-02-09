@@ -9,19 +9,17 @@ import datetime
 import pandas as pd
 
 from pathlib import Path
-from functools import partial
 from omegaconf import DictConfig
 
 from source.components import LossFactory
-from source.dataset import SingleContourTensorDataset
+from source.dataset import MaxContourTensorSurvivalDataset, ppcess_survival_data
 from source.utils import (
     initialize_wandb,
-    train,
-    tune,
-    test,
+    train_survival,
+    tune_survival,
+    test_survival,
     compute_time,
     update_log_dict,
-    collate_features,
     EarlyStopping,
     OptimizerFactory,
     SchedulerFactory,
@@ -29,7 +27,7 @@ from source.utils import (
 
 
 @hydra.main(
-    version_base="1.2.0", config_path="config", config_name="default"
+    version_base="1.2.0", config_path="config", config_name="survival"
 )
 def main(cfg: DictConfig):
 
@@ -44,69 +42,77 @@ def main(cfg: DictConfig):
     output_dir = Path(cfg.output_dir, cfg.experiment_name, run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoint_dir = Path(output_dir, "checkpoints", cfg.level)
+    checkpoint_dir = Path(output_dir, "checkpoints")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    result_dir = Path(output_dir, "results", cfg.level)
+    result_dir = Path(output_dir, "results")
     result_dir.mkdir(parents=True, exist_ok=True)
 
     features_dir = Path(cfg.features_dir)
 
-    num_classes = cfg.num_classes
-    criterion = LossFactory(cfg.loss).get_loss()
+    num_classes = cfg.nbins
+    criterion = LossFactory(cfg.task, cfg.loss).get_loss()
 
-    model = timm.create_model(cfg.model.arch, pretrained=True, num_classes=num_classes, in_chans=cfg.emb_dim)
-    print(model)
+    model = timm.create_model(cfg.model.arch, pretrained=True, num_classes=num_classes, in_chans=cfg.tile_emb_size)
+    # print(model)
 
-    print(f"Loading data")
-    train_df = pd.read_csv(cfg.data.train_csv)
-    tune_df = pd.read_csv(cfg.data.tune_csv)
-    test_df = pd.read_csv(cfg.data.test_csv)
+    print("Loading data")
+    dfs = {}
     tiles_df = pd.read_csv(cfg.tiles_csv)
-    train_df = pd.merge(train_df, tiles_df, on='slide_id')
-    tune_df = pd.merge(tune_df, tiles_df, on='slide_id')
-    test_df = pd.merge(test_df, tiles_df, on='slide_id')
+    for p in ["train", "tune", "test"]:
+        df_path = Path(cfg.fold_dir, f"{p}.csv")
+        df = pd.read_csv(df_path)
+        df = pd.merge(df, tiles_df, on='slide_id')
+        df['partition'] = [p] * len(df)
+        dfs[p] = df
 
     if cfg.training.pct:
         print(f"Training on {cfg.training.pct*100}% of the data")
-        train_df = train_df.sample(frac=cfg.training.pct).reset_index(drop=True)
+        dfs["train"] = dfs["train"].sample(frac=cfg.training.pct).reset_index(drop=True)
 
+    df = pd.concat([df for df in dfs.values()], ignore_index=True)
+    patient_df, slide_df = ppcess_survival_data(df, cfg.label_name, nbins=cfg.nbins)
+
+    patient_dfs, slide_dfs = {}, {}
+    for p in ["train", "tune", "test"]:
+        patient_dfs[p] = patient_df[patient_df.partition == p].reset_index(drop=True)
+        slide_dfs[p] = slide_df[slide_df.partition == p]
+
+    print(patient_dfs["train"].head())
+    print(patient_dfs["tune"].head())
+    print(patient_dfs["test"].head())
     print(f"Initializing training dataset")
-    train_dataset = SingleContourTensorDataset(
-        train_df,
+    train_dataset = MaxContourTensorSurvivalDataset(
+        patient_dfs["train"],
+        slide_dfs["train"],
         features_dir,
         cfg.tile_size,
         cfg.tile_fmt,
         cfg.tile_emb_size,
         cfg.label_name,
-        cfg.label_mapping,
     )
     print(f"Initializing tuning dataset")
-    tune_dataset = SingleContourTensorDataset(
-        tune_df,
+    tune_dataset = MaxContourTensorSurvivalDataset(
+        patient_dfs["tune"],
+        slide_dfs["tune"],
         features_dir,
         cfg.tile_size,
         cfg.tile_fmt,
         cfg.tile_emb_size,
         cfg.label_name,
-        cfg.label_mapping,
     )
     print(f"Initializing testing dataset")
-    test_dataset = SingleContourTensorDataset(
-        test_df,
+    test_dataset = MaxContourTensorSurvivalDataset(
+        patient_dfs["test"],
+        slide_dfs["test"],
         features_dir,
         cfg.tile_size,
         cfg.tile_fmt,
         cfg.tile_emb_size,
         cfg.label_name,
-        cfg.label_mapping,
     )
 
-    m, n = train_dataset.num_classes, tune_dataset.num_classes
-    assert (
-        m == n == cfg.num_classes
-    ), f"Either train (C={m}) or tune (C={n}) sets doesnt cover full class spectrum (C={cfg.num_classes}"
-
+    print("Configuring optimmizer & scheduler")
     model_params = filter(lambda p: p.requires_grad, model.parameters())
     optimizer = OptimizerFactory(
         cfg.optim.name, model_params, lr=cfg.optim.lr, weight_decay=cfg.optim.wd
@@ -139,37 +145,32 @@ def main(cfg: DictConfig):
             if cfg.wandb.enable:
                 log_dict = {"epoch": epoch+1}
 
-            train_results = train(
+            train_results = train_survival(
                 epoch+1,
                 model,
                 train_dataset,
                 optimizer,
                 criterion,
-                collate_fn=partial(collate_features, label_type="int"),
                 batch_size=cfg.training.batch_size,
-                weighted_sampling=cfg.training.weighted_sampling,
             )
 
             if cfg.wandb.enable:
                 update_log_dict("train", train_results, log_dict, to_log=cfg.wandb.to_log)
-            train_dataset.df.to_csv(Path(result_dir, f"train_{epoch}.csv"), index=False)
+            train_dataset.patient_df.to_csv(Path(result_dir, f"train_{epoch}.csv"), index=False)
 
             if epoch % cfg.tuning.tune_every == 0:
 
-                tune_results = tune(
-                    epoch + 1,
+                tune_results = tune_survival(
+                    epoch+1,
                     model,
                     tune_dataset,
                     criterion,
-                    collate_fn=partial(collate_features, label_type="int"),
                     batch_size=cfg.tuning.batch_size,
                 )
 
                 if cfg.wandb.enable:
                     update_log_dict("tune", tune_results, log_dict, to_log=cfg.wandb.to_log)
-                tune_dataset.df.to_csv(
-                    Path(result_dir, f"tune_{epoch}.csv"), index=False
-                )
+                tune_dataset.patient_df.to_csv(Path(result_dir, f"tune_{epoch}.csv"), index=False)
 
                 early_stopping(epoch, model, tune_results)
                 if early_stopping.early_stop and cfg.early_stopping.enable:
@@ -198,26 +199,26 @@ def main(cfg: DictConfig):
                 )
                 break
 
-    # load best model
-    best_model_fp = Path(checkpoint_dir, f"{cfg.testing.retrieve_checkpoint}_model.pt")
-    if cfg.wandb.enable:
-        wandb.save(str(best_model_fp))
-    best_model_sd = torch.load(best_model_fp)
-    model.load_state_dict(best_model_sd)
+    if cfg.testing.run_testing:
+        # load best model
+        best_model_fp = Path(checkpoint_dir, f"{cfg.testing.retrieve_checkpoint}_model.pt")
+        if cfg.wandb.enable:
+            wandb.save(str(best_model_fp))
+        best_model_sd = torch.load(best_model_fp)
+        model.load_state_dict(best_model_sd)
 
-    test_results = test(
-        model,
-        test_dataset,
-        collate_fn=partial(collate_features, label_type="int"),
-        batch_size=1,
-    )
-    test_dataset.df.to_csv(Path(result_dir, f"test.csv"), index=False)
+        test_results = test_survival(
+            model,
+            test_dataset,
+            batch_size=1,
+        )
+        test_dataset.patient_df.to_csv(Path(result_dir, f"test.csv"), index=False)
 
-    for r, v in test_results.items():
-        if r == "auc":
-            v = round(v, 3)
-        if r in cfg.wandb.to_log and cfg.wandb.enable:
-            wandb.log({f"test/{r}": v})
+        for r, v in test_results.items():
+            if r == "c-index":
+                v = round(v, 3)
+            if r in cfg.wandb.to_log and cfg.wandb.enable:
+                wandb.log({f"test/{r}": v})
 
     end_time = time.time()
     mins, secs = compute_time(start_time, end_time)

@@ -289,6 +289,18 @@ class EarlyStopping:
         torch.save(model.state_dict(), Path(self.checkpoint_dir, "latest_model.pt"))
 
 
+def collate_survival_tensors(batch, label_type: str = "int"):
+    idx = torch.LongTensor([item[0] for item in batch])
+    st = [item[1] for item in batch]
+    if label_type == "float":
+        label = torch.FloatTensor([item[2] for item in batch])
+    elif label_type == "int":
+        label = torch.LongTensor([item[2] for item in batch])
+    event_time = torch.FloatTensor([item[3] for item in batch])
+    censorship = torch.FloatTensor([item[4] for item in batch])
+    return [idx, st, label, event_time, censorship]
+
+
 def train(
     epoch: int,
     model: nn.Module,
@@ -524,3 +536,230 @@ def test(
 
     return results
 
+
+def train_survival(
+    epoch: int,
+    model: nn.Module,
+    dataset: torch.utils.data.Dataset,
+    optimizer: torch.optim.Optimizer,
+    criterion: Callable,
+    batch_size: Optional[int] = 1,
+):
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model.train()
+    epoch_loss = 0
+    censorships, event_times = [], []
+    risk_scores, labels = [], []
+    idxs = []
+
+    sampler = torch.utils.data.RandomSampler(dataset)
+    collate_fn = partial(collate_survival_tensors, label_type="int")
+
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        collate_fn=collate_fn,
+    )
+
+    results = {}
+
+    with tqdm.tqdm(
+        loader,
+        desc=(f"Train - Epoch {epoch}"),
+        unit=" patient",
+        ncols=80,
+        unit_scale=batch_size,
+        leave=True,
+    ) as t:
+
+        for i, batch in enumerate(t):
+
+            idx, x, label, event_time, c = batch
+            label, c = label.to(device, non_blocking=True), c.to(device, non_blocking=True)
+            x = x.to(device, non_blocking=True)
+
+            logits = model(x)                           # [1, nbins]
+            hazards = torch.sigmoid(logits)             # [1, nbins]
+            surv = torch.cumprod(1 - hazards, dim=1)    # [1, nbins]
+
+            loss = criterion(hazards, surv, label, c)
+
+            loss_value = loss.item()
+            epoch_loss += loss_value
+
+            risk = -torch.sum(surv, dim=1).detach()     # [1]
+            risk_scores.append(risk.item())
+            censorships.append(c.item())
+            event_times.append(event_time.item())
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            labels.extend(label.clone().tolist())
+            idxs.extend(list(idx))
+
+    dataset.patient_df.loc[idxs, "risk"] = risk_scores
+
+    c_index = concordance_index_censored(
+        [bool(1-c) for c in censorships],
+        event_times,
+        risk_scores,
+        tied_tol=1e-08,
+    )[0]
+
+    results["c-index"] = c_index
+
+    train_loss = epoch_loss / len(loader)
+    results["loss"] = train_loss
+
+    return results
+
+
+def tune_survival(
+    epoch: int,
+    model: nn.Module,
+    dataset: torch.utils.data.Dataset,
+    criterion: Callable,
+    batch_size: Optional[int] = 1,
+):
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model.eval()
+    epoch_loss = 0
+    censorships, event_times = [], []
+    risk_scores, labels = [], []
+    idxs = []
+
+    sampler = torch.utils.data.SequentialSampler(dataset)
+    collate_fn = partial(collate_survival_tensors, label_type="int")
+
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        collate_fn=collate_fn,
+    )
+
+    results = {}
+
+    with tqdm.tqdm(
+        loader,
+        desc=(f"Tune - Epoch {epoch}"),
+        unit=" patient",
+        ncols=80,
+        unit_scale=batch_size,
+        leave=True,
+    ) as t:
+
+        with torch.no_grad():
+
+            for i, batch in enumerate(t):
+
+                idx, x, label, event_time, c = batch
+                label, c = label.to(device, non_blocking=True), c.to(device, non_blocking=True)
+                x = x.to(device, non_blocking=True)
+
+                logits = model(x)
+                hazards = torch.sigmoid(logits)
+                surv = torch.cumprod(1 - hazards, dim=1)
+
+                loss = criterion(hazards, surv, label, c, alpha=0)
+                epoch_loss += loss.item()
+
+                risk = -torch.sum(surv, dim=1).detach()
+                risk_scores.append(risk.item())
+                censorships.append(c.item())
+                event_times.append(event_time.item())
+
+                labels.extend(label.clone().tolist())
+                idxs.extend(list(idx))
+
+    dataset.patient_df.loc[idxs, "risk"] = risk_scores
+
+    c_index = concordance_index_censored(
+        [bool(1-c) for c in censorships],
+        event_times,
+        risk_scores,
+        tied_tol=1e-08,
+    )[0]
+
+    results["c-index"] = c_index
+    results["risks"] = risk_scores
+
+    tune_loss = epoch_loss / len(loader)
+    results["loss"] = tune_loss
+
+    return results
+
+
+def test_survival(
+    model: nn.Module,
+    dataset: torch.utils.data.Dataset,
+    batch_size: Optional[int] = 1,
+):
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model.eval()
+    censorships, event_times = [], []
+    risk_scores, labels = [], []
+    idxs = []
+
+    sampler = torch.utils.data.SequentialSampler(dataset)
+    collate_fn = partial(collate_survival_tensors, label_type="int")
+
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        collate_fn=collate_fn,
+    )
+
+    results = {}
+
+    with tqdm.tqdm(
+        loader,
+        desc=(f"Test"),
+        unit=" patient",
+        ncols=80,
+        unit_scale=batch_size,
+        leave=True,
+    ) as t:
+
+        with torch.no_grad():
+
+            for i, batch in enumerate(t):
+
+                idx, x, label, event_time, c = batch
+                label, c = label.to(device, non_blocking=True), c.to(device, non_blocking=True)
+                x = x.to(device, non_blocking=True)
+
+                logits = model(x)
+                hazards = torch.sigmoid(logits)
+                surv = torch.cumprod(1 - hazards, dim=1)
+
+                risk = -torch.sum(surv, dim=1).detach()
+                risk_scores.append(risk.item())
+                censorships.append(c.item())
+                event_times.append(event_time.item())
+
+                labels.extend(label.clone().tolist())
+                idxs.extend(list(idx))
+
+    dataset.patient_df.loc[idxs, "risk"] = risk_scores
+
+    c_index = concordance_index_censored(
+        [bool(1-c) for c in censorships],
+        event_times,
+        risk_scores,
+        tied_tol=1e-08,
+    )[0]
+
+    results["c-index"] = c_index
+
+    return results

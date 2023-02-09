@@ -8,5 +8,6 @@ torchvision
 scikit-survival
 scikit-learn
 tqdm
+timm
 hydra-core==1.2.0
 opencv-python==4.4.0.46

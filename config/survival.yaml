@@ -1,8 +1,4 @@
-data:
-  train_csv: 'data/debug/train.csv'
-  tune_csv: 'data/debug/tune.csv'
-  test_csv: 'data/debug/test.csv'
-
+fold_dir: 'data/debug'
 tiles_csv: '/data/pathology/projects/ais-cap/dataset/witali-liver/tiles.csv'
 
 output_dir: 'output'
@@ -10,13 +6,12 @@ features_dir: '/data/pathology/projects/ais-cap/code/git/clemsgrs/hipt/output/wi
 
 experiment_name: 'debug'
 
-task: 'classification'
-loss: 'ce'
+task: 'survival'
+loss:
 
 nepochs: 50
-num_classes: 2
-label_name: 'isup_grade'
-label_mapping: {0: 0, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+label_name: 'OS'
+nbins: 4
 
 tile_size: 4096
 tile_fmt: 'jpg'
@@ -32,6 +27,7 @@ tuning:
   tune_every: 1
 
 testing:
+  run_testing: True
   retrieve_checkpoint: 'best'
 
 model:
@@ -62,4 +58,5 @@ wandb:
   dir: '/home/user'
   to_log: ['loss', 'auc']
   group:
+  tags: []
   
