@@ -54,7 +54,11 @@ def main(cfg: DictConfig):
     criterion = LossFactory(cfg.task, cfg.loss).get_loss()
 
     model = timm.create_model(cfg.model.arch, pretrained=False, num_classes=num_classes, in_chans=cfg.tile_emb_size)
-    # print(model)
+    model.cuda()
+    num_params = sum(p.numel() for p in model.parameters())
+    num_params_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total number of parameters: {num_params}")
+    print(f"Total number of trainable parameters: {num_params_train}")
 
     print("Loading data")
     dfs = {}
@@ -178,6 +182,7 @@ def main(cfg: DictConfig):
                 lr = scheduler.get_last_lr()[0]
                 scheduler.step()
             if cfg.wandb.enable:
+                wandb.define_metric("train/lr", step_metric="step")
                 log_dict.update({"train/lr": lr})
 
             # logging
