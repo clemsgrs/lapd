@@ -31,11 +31,11 @@ testing:
   retrieve_checkpoint: 'best'
 
 model:
-  arch: 'resnet18'
+  arch: 'resnet50_gn'
 
 optim:
   name: 'adam'
-  lr: 2e-4
+  lr: 1e-4
   wd: 1e-5
   lr_scheduler:
     name: 'step'
@@ -51,12 +51,12 @@ early_stopping:
   save_all: False
 
 wandb:
-  enable: False
+  enable: True
   project: 'lapd'
   username: 'clemsg'
   exp_name: '${experiment_name}'
   dir: '/home/user'
-  to_log: ['loss', 'auc']
+  to_log: ['loss', 'c-index']
   group:
   tags: []
   
