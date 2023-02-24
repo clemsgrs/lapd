@@ -1,0 +1,61 @@
+fold_dir: '/data/pathology/projects/ais-cap/dataset/witali-liver/splits'
+tiles_csv: '/data/pathology/projects/ais-cap/dataset/witali-liver/tiles.csv'
+
+output_dir: 'output'
+features_dir: '/data/pathology/projects/ais-cap/code/git/clemsgrs/hipt/output/witali-liver_indiv/features/global/region'
+
+experiment_name: 'debug_multi'
+
+task: 'survival'
+loss:
+
+nepochs: 50
+label_name: 'OS'
+nbins: 4
+
+tile_size: 4096
+tile_fmt: 'jpg'
+tile_emb_size: 192
+
+training:
+  batch_size: 1
+  pct:
+
+tuning:
+  batch_size: 1
+  tune_every: 1
+
+testing:
+  run_testing: True
+  retrieve_checkpoint: 'best'
+
+model:
+  arch: 'cnn'
+
+optim:
+  name: 'adam'
+  lr: 1e-4
+  wd: 1e-5
+  lr_scheduler:
+    name: 'step'
+    step_size: 50
+    gamma: 0.5
+
+early_stopping:
+  enable: False
+  tracking: 'loss'
+  min_max: 'min'
+  patience: 10
+  min_epoch: 30
+  save_all: False
+
+wandb:
+  enable: True
+  project: 'lapd'
+  username: 'clemsg'
+  exp_name: '${experiment_name}'
+  dir: '/home/user'
+  to_log: ['loss', 'c-index']
+  group:
+  tags: []
+  
