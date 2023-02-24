@@ -12,7 +12,7 @@ from omegaconf import DictConfig
 
 from source.models import ModelFactory
 from source.components import LossFactory
-from source.dataset import MaxSlideTensorSurvivalDataset, ppcess_survival_data
+from source.dataset import TensorSurvivalDataset, ppcess_survival_data
 from source.utils import (
     initialize_wandb,
     train_survival,
@@ -27,7 +27,7 @@ from source.utils import (
 
 
 @hydra.main(
-    version_base="1.2.0", config_path="config", config_name="survival"
+    version_base="1.2.0", config_path="config", config_name="single"
 )
 def main(cfg: DictConfig):
 
@@ -53,7 +53,7 @@ def main(cfg: DictConfig):
     num_classes = cfg.nbins
     criterion = LossFactory(cfg.task, cfg.loss).get_loss()
 
-    model = ModelFactory(cfg.model.arch, cfg.tile_emb_size, num_classes).get_model()
+    model = ModelFactory(cfg.model.arch, cfg.tile_emb_size, num_classes, cfg.model).get_model()
     model.cuda()
     num_params = sum(p.numel() for p in model.parameters())
     num_params_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -83,7 +83,7 @@ def main(cfg: DictConfig):
         slide_dfs[p] = slide_df[slide_df.partition == p]
 
     print(f"Initializing training dataset")
-    train_dataset = MaxSlideTensorSurvivalDataset(
+    train_dataset = TensorSurvivalDataset(
         patient_dfs["train"],
         slide_dfs["train"],
         features_dir,
@@ -93,7 +93,7 @@ def main(cfg: DictConfig):
         cfg.label_name,
     )
     print(f"Initializing tuning dataset")
-    tune_dataset = MaxSlideTensorSurvivalDataset(
+    tune_dataset = TensorSurvivalDataset(
         patient_dfs["tune"],
         slide_dfs["tune"],
         features_dir,
@@ -103,7 +103,7 @@ def main(cfg: DictConfig):
         cfg.label_name,
     )
     print(f"Initializing testing dataset")
-    test_dataset = MaxSlideTensorSurvivalDataset(
+    test_dataset = TensorSurvivalDataset(
         patient_dfs["test"],
         slide_dfs["test"],
         features_dir,
@@ -153,6 +153,7 @@ def main(cfg: DictConfig):
                 optimizer,
                 criterion,
                 batch_size=cfg.training.batch_size,
+                agg_method=cfg.model.agg_method,
             )
 
             if cfg.wandb.enable:
@@ -167,6 +168,7 @@ def main(cfg: DictConfig):
                     tune_dataset,
                     criterion,
                     batch_size=cfg.tuning.batch_size,
+                    agg_method=cfg.model.agg_method,
                 )
 
                 if cfg.wandb.enable:
@@ -213,6 +215,7 @@ def main(cfg: DictConfig):
             model,
             test_dataset,
             batch_size=1,
+            agg_method=cfg.model.agg_method,
         )
         test_dataset.patient_df.to_csv(Path(result_dir, f"test.csv"), index=False)
 

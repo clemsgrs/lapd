@@ -15,7 +15,7 @@ from omegaconf import DictConfig
 
 from source.models import ModelFactory
 from source.components import LossFactory
-from source.dataset import MaxSlideTensorSurvivalDataset, ppcess_survival_data
+from source.dataset import MaxSlideTensorSurvivalDataset, RandomSlideTensorSurvivalDataset, ppcess_survival_data
 from source.utils import (
     initialize_wandb,
     train_survival,
@@ -91,7 +91,7 @@ def main(cfg: DictConfig):
             slide_dfs[p] = slide_df[slide_df.partition == p]
 
         print(f"Initializing training dataset")
-        train_dataset = MaxSlideTensorSurvivalDataset(
+        train_dataset = RandomSlideTensorSurvivalDataset(
             patient_dfs["train"],
             slide_dfs["train"],
             features_dir,
@@ -101,7 +101,7 @@ def main(cfg: DictConfig):
             cfg.label_name,
         )
         print(f"Initializing tuning dataset")
-        tune_dataset = MaxSlideTensorSurvivalDataset(
+        tune_dataset = RandomSlideTensorSurvivalDataset(
             patient_dfs["tune"],
             slide_dfs["tune"],
             features_dir,
@@ -111,7 +111,7 @@ def main(cfg: DictConfig):
             cfg.label_name,
         )
         print(f"Initializing testing dataset")
-        test_dataset = MaxSlideTensorSurvivalDataset(
+        test_dataset = RandomSlideTensorSurvivalDataset(
             patient_dfs["test"],
             slide_dfs["test"],
             features_dir,
