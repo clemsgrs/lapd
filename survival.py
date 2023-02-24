@@ -1,7 +1,6 @@
 import os
 import time
 import tqdm
-import timm
 import wandb
 import torch
 import hydra
@@ -11,8 +10,9 @@ import pandas as pd
 from pathlib import Path
 from omegaconf import DictConfig
 
+from source.models import ModelFactory
 from source.components import LossFactory
-from source.dataset import MaxContourTensorSurvivalDataset, ppcess_survival_data
+from source.dataset import MaxSlideTensorSurvivalDataset, ppcess_survival_data
 from source.utils import (
     initialize_wandb,
     train_survival,
@@ -53,7 +53,7 @@ def main(cfg: DictConfig):
     num_classes = cfg.nbins
     criterion = LossFactory(cfg.task, cfg.loss).get_loss()
 
-    model = timm.create_model(cfg.model.arch, pretrained=False, num_classes=num_classes, in_chans=cfg.tile_emb_size)
+    model = ModelFactory(cfg.model.arch, cfg.tile_emb_size, num_classes).get_model()
     model.cuda()
     num_params = sum(p.numel() for p in model.parameters())
     num_params_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -83,7 +83,7 @@ def main(cfg: DictConfig):
         slide_dfs[p] = slide_df[slide_df.partition == p]
 
     print(f"Initializing training dataset")
-    train_dataset = MaxContourTensorSurvivalDataset(
+    train_dataset = MaxSlideTensorSurvivalDataset(
         patient_dfs["train"],
         slide_dfs["train"],
         features_dir,
@@ -93,7 +93,7 @@ def main(cfg: DictConfig):
         cfg.label_name,
     )
     print(f"Initializing tuning dataset")
-    tune_dataset = MaxContourTensorSurvivalDataset(
+    tune_dataset = MaxSlideTensorSurvivalDataset(
         patient_dfs["tune"],
         slide_dfs["tune"],
         features_dir,
@@ -103,7 +103,7 @@ def main(cfg: DictConfig):
         cfg.label_name,
     )
     print(f"Initializing testing dataset")
-    test_dataset = MaxContourTensorSurvivalDataset(
+    test_dataset = MaxSlideTensorSurvivalDataset(
         patient_dfs["test"],
         slide_dfs["test"],
         features_dir,
