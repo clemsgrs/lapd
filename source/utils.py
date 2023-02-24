@@ -289,9 +289,12 @@ class EarlyStopping:
         torch.save(model.state_dict(), Path(self.checkpoint_dir, "latest_model.pt"))
 
 
-def collate_survival_tensors(batch, label_type: str = "int"):
+def collate_survival_tensors(batch, label_type: str = "int", agg_method: str = "max_slide"):
     idx = torch.LongTensor([item[0] for item in batch])
-    st = [item[1] for item in batch]
+    if agg_method == "max_slide":
+        st = [item[1] for item in batch]
+    elif agg_method == "self_att":
+        st = [item[1] for item in batch]
     if label_type == "float":
         label = torch.FloatTensor([item[2] for item in batch])
     elif label_type == "int":
@@ -544,6 +547,7 @@ def train_survival(
     optimizer: torch.optim.Optimizer,
     criterion: Callable,
     batch_size: Optional[int] = 1,
+    agg_method: str = "max_slide",
 ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -579,7 +583,10 @@ def train_survival(
 
             idx, x, label, event_time, c = batch
             label, c = label.to(device, non_blocking=True), c.to(device, non_blocking=True)
-            x = x.to(device, non_blocking=True)
+            if agg_method == "max_slide":
+                x = x.to(device, non_blocking=True)
+            elif agg_method == "self_att":
+                x = [t.to(device, non_blocking=True) for t in x]
 
             logits = model(x)                           # [1, nbins]
             hazards = torch.sigmoid(logits)             # [1, nbins]
@@ -625,6 +632,7 @@ def tune_survival(
     dataset: torch.utils.data.Dataset,
     criterion: Callable,
     batch_size: Optional[int] = 1,
+    agg_method: str = "max_slide",
 ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -662,7 +670,10 @@ def tune_survival(
 
                 idx, x, label, event_time, c = batch
                 label, c = label.to(device, non_blocking=True), c.to(device, non_blocking=True)
-                x = x.to(device, non_blocking=True)
+                if agg_method == "max_slide":
+                    x = x.to(device, non_blocking=True)
+                elif agg_method == "self_att":
+                    x = [t.to(device, non_blocking=True) for t in x]
 
                 logits = model(x)
                 hazards = torch.sigmoid(logits)
@@ -701,6 +712,7 @@ def test_survival(
     model: nn.Module,
     dataset: torch.utils.data.Dataset,
     batch_size: Optional[int] = 1,
+    agg_method: str = "max_slide",
 ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -737,7 +749,10 @@ def test_survival(
 
                 idx, x, label, event_time, c = batch
                 label, c = label.to(device, non_blocking=True), c.to(device, non_blocking=True)
-                x = x.to(device, non_blocking=True)
+                if agg_method == "max_slide":
+                    x = x.to(device, non_blocking=True)
+                elif agg_method == "self_att":
+                    x = [t.to(device, non_blocking=True) for t in x]
 
                 logits = model(x)
                 hazards = torch.sigmoid(logits)
