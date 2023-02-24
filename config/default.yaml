@@ -62,4 +62,7 @@ wandb:
   dir: '/home/user'
   to_log: ['loss', 'auc']
   group:
-  
+
+hydra:
+  run:
+    dir: /tmp/hydra_output
