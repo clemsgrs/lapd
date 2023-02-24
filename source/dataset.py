@@ -122,7 +122,7 @@ class MaxContourTensorDataset(torch.utils.data.Dataset):
         return len(self.slide_df)
 
 
-class MaxContourTensorSurvivalDataset(torch.utils.data.Dataset):
+class MaxSlideTensorSurvivalDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         patient_df: pd.DataFrame,
@@ -146,7 +146,7 @@ class MaxContourTensorSurvivalDataset(torch.utils.data.Dataset):
 
     def prepare_data(self, df, ntile_min: int = -1):
         if self.label_name != "label":
-            df["label"] = df[self.label_name]
+            df["label"] = df.loc[:, self.label_name]
         tmp = df.groupby(['slide_id', 'contour']).contour.size().to_frame().rename(columns={'contour': 'ntile'}).reset_index()
         self.filtered_contours = defaultdict(dict)
         for slide_id, contour, ntile in tmp[tmp.ntile >= ntile_min].values:
@@ -166,23 +166,19 @@ class MaxContourTensorSurvivalDataset(torch.utils.data.Dataset):
 
     def get_slide_id_with_max_ntile(self, case_id: str):
         slide_ids = self.slide_df[self.slide_df.case_id == case_id].slide_id.values.tolist()
-        max_cont_dict = {}
+        ntile_dict = {}
         for slide_id in slide_ids:
-            max_cont = self.get_contour_with_max_ntile(slide_id)
-            max_cont_dict[slide_id] = max_cont
-        return max(max_cont_dict, key=lambda key: max_cont_dict[key])
-
-    def get_contour_with_max_ntile(self, slide_id: str):
-        return max(self.filtered_contours[slide_id], key=lambda key: self.filtered_contours[slide_id][key])
+            ntile = np.sum([self.filtered_contours[slide_id][c] for c in self.filtered_contours[slide_id].keys()])
+            ntile_dict[slide_id] = ntile
+        return max(ntile_dict, key=lambda key: ntile_dict[key])
 
     def __getitem__(self, idx: int):
         row = self.patient_df.loc[idx]
         case_id = row.case_id
         slide_id = self.get_slide_id_with_max_ntile(case_id)
         df = self.tile_df[self.tile_df.slide_id == slide_id]
-        max_cont = self.get_contour_with_max_ntile(slide_id)
-        df_cont = df[df.contour == max_cont]
-        coords = df_cont[['x', 'y']].values
+        
+        coords = df[['x', 'y']].values
         m = self.get_tensor_shape(coords, self.tile_size)
         t = torch.zeros((m,m,self.emb_size))
 
@@ -202,6 +198,50 @@ class MaxContourTensorSurvivalDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.patient_df)
+
+
+class MaxSlideMaxContourTensorSurvivalDataset(MaxSlideTensorSurvivalDataset):
+    def __init__(
+        self,
+        patient_df: pd.DataFrame,
+        slide_df: pd.DataFrame,
+        features_dir: Path,
+        tile_size: int,
+        fmt: str = 'jpg',
+        emb_size: int = 192,
+        label_name: str = "label",
+    ):
+
+        super().__init__(patient_df, slide_df, features_dir, tile_size, fmt, emb_size, label_name)
+
+    def get_contour_with_max_ntile(self, slide_id: str):
+        return max(self.filtered_contours[slide_id], key=lambda key: self.filtered_contours[slide_id][key])
+
+    def __getitem__(self, idx: int):
+        row = self.patient_df.loc[idx]
+        case_id = row.case_id
+        slide_id = self.get_slide_id_with_max_ntile(case_id)
+        df = self.tile_df[self.tile_df.slide_id == slide_id]
+        
+        max_cont = self.get_contour_with_max_ntile(slide_id)
+        df_cont = df[df.contour == max_cont]
+        coords = df_cont[['x', 'y']].values
+        m = self.get_tensor_shape(coords, self.tile_size)
+        t = torch.zeros((m,m,self.emb_size))
+
+        for (x,y) in coords:
+            emb_path = Path(self.features_dir, f'{slide_id}_{x}_{y}.pt')
+            emb = torch.load(emb_path)
+            i, j = y // self.tile_size, x // self.tile_size
+            t[i,j] = emb
+
+        # put channels first
+        t = t.permute(2, 0, 1)
+
+        label = row.disc_label
+        event_time = row[self.label_name]
+        c = row.censorship
+        return idx, t, label, event_time, c
 
 
 class SparseTensorDataset(torch.utils.data.Dataset):
