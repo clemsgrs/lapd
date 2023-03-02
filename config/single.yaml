@@ -1,10 +1,11 @@
-fold_dir: '/data/pathology/projects/ais-cap/dataset/witali-liver/splits/fold_0'
+fold_dir: '/data/pathology/projects/ais-cap/dataset/witali-liver/splits/fold_4'
 tiles_csv: '/data/pathology/projects/ais-cap/dataset/witali-liver/tiles.csv'
 
 output_dir: 'output/debug'
 features_dir: '/data/pathology/projects/ais-cap/dataset/witali-liver/features/global/2qi92y06/region'
 
 experiment_name: 'single'
+resume: False
 
 task: 'survival'
 loss:

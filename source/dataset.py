@@ -256,7 +256,7 @@ class TensorSurvivalDataset(torch.utils.data.Dataset):
         row = self.patient_df.loc[idx]
         case_id = row.case_id
         slide_ids = self.slide_df[self.slide_df.case_id == case_id].slide_id.values.tolist()
-        
+
         tensors = []
         for slide_id in slide_ids:
             df = self.tile_df[self.tile_df.slide_id == slide_id]

@@ -5,6 +5,7 @@ output_dir: 'output/debug'
 features_dir: '/data/pathology/projects/ais-cap/dataset/witali-liver/features/global/2qi92y06/region'
 
 experiment_name: 'multi'
+resume: False
 
 task: 'survival'
 loss:
@@ -31,6 +32,7 @@ testing:
 
 model:
   arch: 'cnn'
+  agg_method: 'self_att'
 
 optim:
   name: 'adam'
@@ -58,7 +60,7 @@ wandb:
   to_log: ['loss', 'c-index']
   group:
   tags: []
-  
+
 hydra:
   run:
     dir: /tmp/hydra_output
