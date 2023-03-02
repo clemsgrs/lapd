@@ -40,17 +40,6 @@ def nll_loss(hazards, survival, Y, c, alpha=0.4, eps=1e-7):
     return loss
 
 
-class NLLSurvLoss(object):
-    def __init__(self, alpha=0.15):
-        self.alpha = alpha
-
-    def __call__(self, hazards, S, label, c, alpha=None):
-        if alpha is None:
-            return nll_loss(hazards, S, label, c, alpha=self.alpha)
-        else:
-            return nll_loss(hazards, S, label, c, alpha=alpha)
-
-
 class LossFactory:
     def __init__(
         self,
@@ -71,3 +60,14 @@ class LossFactory:
 
     def get_loss(self):
         return self.criterion
+
+
+class NLLSurvLoss(object):
+    def __init__(self, alpha=0.15):
+        self.alpha = alpha
+
+    def __call__(self, hazards, S, label, c, alpha=None):
+        if alpha is None:
+            return nll_loss(hazards, S, label, c, alpha=self.alpha)
+        else:
+            return nll_loss(hazards, S, label, c, alpha=alpha)

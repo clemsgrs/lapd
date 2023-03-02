@@ -18,6 +18,7 @@ from source.utils import (
     train_survival,
     tune_survival,
     test_survival,
+    resume_from_checkpoint,
     compute_time,
     update_log_dict,
     EarlyStopping,
@@ -129,11 +130,21 @@ def main(cfg: DictConfig):
         save_all=cfg.early_stopping.save_all,
     )
 
+    epochs_run = 0
+    if cfg.resume:
+        ckpt_path = Path(output_dir, cfg.resume_from_checkpoint)
+        epochs_run = resume_from_checkpoint(
+            ckpt_path,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+        )
+
     stop = False
     start_time = time.time()
 
     with tqdm.tqdm(
-        range(cfg.nepochs),
+        range(epochs_run, cfg.nepochs),
         desc=(f"LAPD Training"),
         unit=" slide",
         ncols=100,
@@ -175,7 +186,13 @@ def main(cfg: DictConfig):
                     update_log_dict("tune", tune_results, log_dict, to_log=cfg.wandb.to_log)
                 tune_dataset.patient_df.to_csv(Path(result_dir, f"tune_{epoch}.csv"), index=False)
 
-                early_stopping(epoch, model, tune_results)
+                save_dict = {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "epoch": epoch,
+                }
+                early_stopping(epoch, save_dict, tune_results)
                 if early_stopping.early_stop and cfg.early_stopping.enable:
                     stop = True
 

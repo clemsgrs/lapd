@@ -15,7 +15,7 @@ from omegaconf import DictConfig
 
 from source.models import ModelFactory
 from source.components import LossFactory
-from source.dataset import MaxSlideTensorSurvivalDataset, RandomSlideTensorSurvivalDataset, ppcess_survival_data
+from source.dataset import MaxSlideTensorSurvivalDataset, RandomSlideTensorSurvivalDataset, TensorSurvivalDataset, ppcess_survival_data
 from source.utils import (
     initialize_wandb,
     train_survival,
@@ -91,7 +91,7 @@ def main(cfg: DictConfig):
             slide_dfs[p] = slide_df[slide_df.partition == p]
 
         print(f"Initializing training dataset")
-        train_dataset = RandomSlideTensorSurvivalDataset(
+        train_dataset = TensorSurvivalDataset(
             patient_dfs["train"],
             slide_dfs["train"],
             features_dir,
@@ -101,7 +101,7 @@ def main(cfg: DictConfig):
             cfg.label_name,
         )
         print(f"Initializing tuning dataset")
-        tune_dataset = RandomSlideTensorSurvivalDataset(
+        tune_dataset = TensorSurvivalDataset(
             patient_dfs["tune"],
             slide_dfs["tune"],
             features_dir,
@@ -111,7 +111,7 @@ def main(cfg: DictConfig):
             cfg.label_name,
         )
         print(f"Initializing testing dataset")
-        test_dataset = RandomSlideTensorSurvivalDataset(
+        test_dataset = TensorSurvivalDataset(
             patient_dfs["test"],
             slide_dfs["test"],
             features_dir,
@@ -124,7 +124,7 @@ def main(cfg: DictConfig):
         num_classes = cfg.nbins
         criterion = LossFactory(cfg.task, cfg.loss).get_loss()
 
-        model = ModelFactory(cfg.model.arch, cfg.tile_emb_size, num_classes).get_model()
+        model = ModelFactory(cfg.model.arch, cfg.tile_emb_size, num_classes, cfg.model).get_model()
         model.cuda()
         num_params = sum(p.numel() for p in model.parameters())
         num_params_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -174,6 +174,7 @@ def main(cfg: DictConfig):
                     optimizer,
                     criterion,
                     batch_size=cfg.training.batch_size,
+                    agg_method=cfg.model.agg_method,
                 )
 
                 if cfg.wandb.enable:
@@ -188,13 +189,20 @@ def main(cfg: DictConfig):
                         tune_dataset,
                         criterion,
                         batch_size=cfg.tuning.batch_size,
+                        agg_method=cfg.model.agg_method,
                     )
 
                     if cfg.wandb.enable:
                         update_log_dict(f"tune/fold_{i}", tune_results, log_dict, step=f"train/fold_{i}/epoch", to_log=cfg.wandb.to_log)
                     tune_dataset.patient_df.to_csv(Path(result_dir, f"tune_{epoch}.csv"), index=False)
 
-                    early_stopping(epoch, model, tune_results)
+                    save_dict = {
+                        "model": model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "epoch": epoch,
+                    }
+                    early_stopping(epoch, save_dict, tune_results)
                     if early_stopping.early_stop and cfg.early_stopping.enable:
                         stop = True
 
@@ -210,7 +218,7 @@ def main(cfg: DictConfig):
 
                 # logging
                 if cfg.wandb.enable:
-                    wandb.log(log_dict, step=epoch+1)
+                    wandb.log(log_dict)
 
                 epoch_end_time = time.time()
                 epoch_mins, epoch_secs = compute_time(epoch_start_time, epoch_end_time)
@@ -240,6 +248,7 @@ def main(cfg: DictConfig):
                 model,
                 test_dataset,
                 batch_size=1,
+                agg_method=cfg.model.agg_method,
             )
             test_dataset.patient_df.to_csv(Path(result_dir, f"test.csv"), index=False)
 

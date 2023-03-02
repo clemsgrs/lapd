@@ -157,6 +157,39 @@ def update_log_dict(
             log_dict.update({f"{prefix}/{r}": v})
 
 
+def resume_from_checkpoint(ckpt_path, **kwargs):
+    """
+    Re-start from checkpoint
+    """
+    if not Path(ckpt_path).is_file():
+        return
+    print(f"Found checkpoint at {ckpt_path}")
+
+    # open checkpoint file
+    checkpoint = torch.load(ckpt_path, map_location="cpu")
+    epoch = checkpoint["epoch"]
+
+    # key is what to look for in the checkpoint file
+    # value is the object to load
+    # example: {'state_dict': model}
+    for key, value in kwargs.items():
+        if key in checkpoint and value is not None:
+            try:
+                msg = value.load_state_dict(checkpoint[key], strict=False)
+                print(
+                    f"=> loaded '{key}' from checkpoint: '{ckpt_path}' with msg {msg}"
+                )
+            except TypeError:
+                try:
+                    msg = value.load_state_dict(checkpoint[key])
+                    print(f"=> loaded '{key}' from checkpoint: '{ckpt_path}'")
+                except ValueError:
+                    print(f"=> failed to load '{key}' from checkpoint: '{ckpt_path}'")
+        else:
+            print(f"=> key '{key}' not found in checkpoint: '{ckpt_path}'")
+    return epoch
+
+
 def make_weights_for_balanced_classes(dataset):
     n_samples = len(dataset)
     weight_per_class = []
@@ -258,7 +291,7 @@ class EarlyStopping:
         self.best_score = None
         self.early_stop = False
 
-    def __call__(self, epoch, model, results):
+    def __call__(self, epoch, save_dict, results):
 
         score = results[self.tracking]
         if self.min_max == "min":
@@ -266,8 +299,8 @@ class EarlyStopping:
 
         if self.best_score is None or score >= self.best_score:
             self.best_score = score
-            fname = f"best_model.pt"
-            torch.save(model.state_dict(), Path(self.checkpoint_dir, fname))
+            fname = f"best.pt"
+            torch.save(save_dict, Path(self.checkpoint_dir, fname))
             self.counter = 0
 
         elif score < self.best_score:
@@ -283,10 +316,10 @@ class EarlyStopping:
 
         if self.save_all:
             fname = f"epoch_{epoch}.pt"
-            torch.save(model.state_dict(), Path(self.checkpoint_dir, fname))
+            torch.save(save_dict, Path(self.checkpoint_dir, fname))
 
         # override latest
-        torch.save(model.state_dict(), Path(self.checkpoint_dir, "latest_model.pt"))
+        torch.save(save_dict, Path(self.checkpoint_dir, "latest.pt"))
 
 
 def collate_survival_tensors(batch, label_type: str = "int", agg_method: str = "max_slide"):
