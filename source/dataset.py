@@ -234,7 +234,7 @@ class TensorSurvivalDataset(torch.utils.data.Dataset):
 
     def prepare_data(self, df, ntile_min: int = -1):
         if self.label_name != "label":
-            df["label"] = df.loc[:, self.label_name]
+            df.loc[:, "label"] = df[self.label_name]
         tmp = df.groupby(['slide_id', 'contour']).contour.size().to_frame().rename(columns={'contour': 'ntile'}).reset_index()
         self.filtered_contours = defaultdict(dict)
         for slide_id, contour, ntile in tmp[tmp.ntile >= ntile_min].values:

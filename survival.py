@@ -222,10 +222,10 @@ def main(cfg: DictConfig):
 
     if cfg.testing.run_testing:
         # load best model
-        best_model_fp = Path(checkpoint_dir, f"{cfg.testing.retrieve_checkpoint}_model.pt")
+        best_model_fp = Path(checkpoint_dir, f"{cfg.testing.retrieve_checkpoint}.pt")
         if cfg.wandb.enable:
             wandb.save(str(best_model_fp))
-        best_model_sd = torch.load(best_model_fp)
+        best_model_sd = torch.load(best_model_fp)["model"]
         model.load_state_dict(best_model_sd)
 
         test_results = test_survival(
@@ -241,6 +241,8 @@ def main(cfg: DictConfig):
                 v = round(v, 3)
             if r in cfg.wandb.to_log and cfg.wandb.enable:
                 wandb.log({f"test/{r}": v})
+            else:
+                print(f"Test {r}: {v}")
 
     end_time = time.time()
     mins, secs = compute_time(start_time, end_time)
